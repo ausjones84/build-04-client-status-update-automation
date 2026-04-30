@@ -1,0 +1,174 @@
+{
+  "name": "Build #4 - Stage Change Trigger",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "ghl-stage-change",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "node-001",
+      "name": "GHL Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$json.type}}",
+              "operation": "equal",
+              "value2": "ContactStageUpdate"
+            }
+          ]
+        }
+      },
+      "id": "node-002",
+      "name": "Filter Stage Changes",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://services.leadconnectorhq.com/contacts/{{$json.contact_id}}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "highLevelApi",
+        "options": {}
+      },
+      "id": "node-003",
+      "name": "Get Contact Details",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [680, 220]
+    },
+    {
+      "parameters": {
+        "jsCode": "const contact = $('Get Contact Details').first().json.contact;\nconst stage = $input.first().json.pipeline_stage_name;\nconst firstName = contact.firstName || 'Client';\n\nconst stageMessages = {\n  'New Lead': 'Your case has been received and assigned to our intake team. We will contact you within 24 hours.',\n  'Consultation Scheduled': 'Your consultation has been scheduled. Please check your email for appointment details.',\n  'Documents Requested': 'We need a few documents to proceed with your case. Please check your email for the document checklist.',\n  'Under Review': 'Your case is currently under review by our legal team. We will have an update for you within 3-5 business days.',\n  'Demand Letter Sent': 'A demand letter has been sent to the opposing party. We are awaiting their response.',\n  'Negotiation': 'Your case is in active negotiation. Our team is working hard to reach the best possible outcome.',\n  'Settlement Reached': 'Great news! A settlement has been reached. Our team will contact you shortly to review the terms.',\n  'Closed Won': 'Your case has been successfully resolved. Thank you for trusting us with your case.',\n  'Closed Lost': 'After careful review, we were unable to proceed with your case. Please contact us if you have questions.'\n};\n\nconst message = stageMessages[stage] || `Your case status has been updated to: ${stage}. Our team will be in touch soon.`;\n\nreturn [{ json: {\n  contactId: contact.id,\n  firstName,\n  phone: contact.phone,\n  email: contact.email,\n  stage,\n  smsBody: `Hi ${firstName}, we have an update on your case! ${message} - Mr. Cees AI Legal Team`,\n  emailSubject: `Case Update: ${stage}`,\n  emailBody: `Hi ${firstName},\\n\\nWe wanted to keep you informed about your case progress.\\n\\n${message}\\n\\nIf you have any questions, please don't hesitate to reach out.\\n\\nWarm regards,\\nThe Legal Team`\n}}];"
+      },
+      "id": "node-004",
+      "name": "Build Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 220]
+    },
+    {
+      "parameters": {
+        "url": "https://services.leadconnectorhq.com/conversations/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "highLevelApi",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "type", "value": "SMS" },
+            { "name": "contactId", "value": "={{$json.contactId}}" },
+            { "name": "message", "value": "={{$json.smsBody}}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-005",
+      "name": "Send SMS via GHL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1120, 140]
+    },
+    {
+      "parameters": {
+        "url": "https://services.leadconnectorhq.com/conversations/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "highLevelApi",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "type", "value": "Email" },
+            { "name": "contactId", "value": "={{$json.contactId}}" },
+            { "name": "subject", "value": "={{$json.emailSubject}}" },
+            { "name": "html", "value": "={{$json.emailBody}}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-006",
+      "name": "Send Email via GHL",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{$('Get Contact Details').first().json.contact.tags}}",
+              "operation": "contains",
+              "value2": "urgent"
+            }
+          ]
+        }
+      },
+      "id": "node-007",
+      "name": "Check Urgent Flag",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1340, 220]
+    },
+    {
+      "parameters": {
+        "url": "={{$env.SLACK_WEBHOOK_URL}}",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "text",
+              "value": "=URGENT: Client {{$('Build Message').first().json.firstName}} ({{$('Build Message').first().json.phone}}) case moved to {{$('Build Message').first().json.stage}}. Immediate attention required."
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-008",
+      "name": "Notify Attorney Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1560, 140]
+    }
+  ],
+  "connections": {
+    "GHL Webhook Trigger": {
+      "main": [[ { "node": "Filter Stage Changes", "type": "main", "index": 0 } ]]
+    },
+    "Filter Stage Changes": {
+      "main": [
+        [ { "node": "Get Contact Details", "type": "main", "index": 0 } ],
+        []
+      ]
+    },
+    "Get Contact Details": {
+      "main": [[ { "node": "Build Message", "type": "main", "index": 0 } ]]
+    },
+    "Build Message": {
+      "main": [
+        [ { "node": "Send SMS via GHL", "type": "main", "index": 0 }, { "node": "Send Email via GHL", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Send SMS via GHL": {
+      "main": [[ { "node": "Check Urgent Flag", "type": "main", "index": 0 } ]]
+    },
+    "Check Urgent Flag": {
+      "main": [
+        [ { "node": "Notify Attorney Slack", "type": "main", "index": 0 } ],
+        []
+      ]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "tags": ["build-04", "client-status", "stage-change"]
+}
