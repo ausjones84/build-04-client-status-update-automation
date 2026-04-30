@@ -1,0 +1,142 @@
+{
+  "name": "Build #4 - Weekly Check-In SMS",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "hours", "hoursInterval": 24 }]
+        }
+      },
+      "id": "node-001",
+      "name": "Daily Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://services.leadconnectorhq.com/contacts/",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "highLevelApi",
+        "qs": {
+          "locationId": "={{$env.GHL_LOCATION_ID}}",
+          "limit": 100,
+          "pipelineId": "={{$env.GHL_PIPELINE_ID}}"
+        },
+        "options": {}
+      },
+      "id": "node-002",
+      "name": "Get All Active Contacts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const contacts = $input.first().json.contacts || [];\nconst sevenDaysAgo = new Date();\nsevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);\n\nconst staleContacts = contacts.filter(c => {\n  if (!c.lastStageChangeAt) return false;\n  const lastChange = new Date(c.lastStageChangeAt);\n  return lastChange < sevenDaysAgo;\n});\n\nreturn staleContacts.map(c => ({ json: c }));"
+      },
+      "id": "node-003",
+      "name": "Filter Stale Cases (7+ days)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const contact = $input.first().json;\nconst firstName = contact.firstName || 'Client';\nconst stage = contact.pipelineStage || 'current stage';\nconst daysSince = Math.floor((Date.now() - new Date(contact.lastStageChangeAt)) / (1000 * 60 * 60 * 24));\n\nreturn [{ json: {\n  contactId: contact.id,\n  firstName,\n  phone: contact.phone,\n  email: contact.email,\n  stage,\n  daysSince,\n  smsBody: `Hi ${firstName}, just checking in on your case! Your case is currently in the ${stage} stage. Our team is actively working on it. If you have any questions, please reply or call us. - Legal Team`,\n  emailSubject: 'Weekly Case Status Check-In',\n  emailBody: `Hi ${firstName},\\n\\nWe wanted to reach out with a weekly update on your case.\\n\\nYour case is currently in the ${stage} stage. Our team has been working diligently on your behalf.\\n\\nIt has been ${daysSince} days since your last case update. We want to assure you that your case is a priority for us.\\n\\nIf you have any questions or concerns, please don't hesitate to reach out.\\n\\nWarm regards,\\nThe Legal Team`\n}}];"
+      },
+      "id": "node-004",
+      "name": "Build Check-In Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://services.leadconnectorhq.com/conversations/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "highLevelApi",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "type", "value": "SMS" },
+            { "name": "contactId", "value": "={{$json.contactId}}" },
+            { "name": "message", "value": "={{$json.smsBody}}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-005",
+      "name": "Send Check-In SMS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1120, 220]
+    },
+    {
+      "parameters": {
+        "url": "https://services.leadconnectorhq.com/conversations/messages",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "highLevelApi",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "type", "value": "Email" },
+            { "name": "contactId", "value": "={{$json.contactId}}" },
+            { "name": "subject", "value": "={{$json.emailSubject}}" },
+            { "name": "html", "value": "={{$json.emailBody}}" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-006",
+      "name": "Send Check-In Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1120, 380]
+    },
+    {
+      "parameters": {
+        "url": "https://services.leadconnectorhq.com/contacts/{{$('Build Check-In Message').first().json.contactId}}/tags",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "highLevelApi",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "tags", "value": "=["checkin-sent"]" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-007",
+      "name": "Tag Contact - CheckIn Sent",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1340, 300]
+    }
+  ],
+  "connections": {
+    "Daily Schedule Trigger": {
+      "main": [[ { "node": "Get All Active Contacts", "type": "main", "index": 0 } ]]
+    },
+    "Get All Active Contacts": {
+      "main": [[ { "node": "Filter Stale Cases (7+ days)", "type": "main", "index": 0 } ]]
+    },
+    "Filter Stale Cases (7+ days)": {
+      "main": [[ { "node": "Build Check-In Message", "type": "main", "index": 0 } ]]
+    },
+    "Build Check-In Message": {
+      "main": [
+        [ { "node": "Send Check-In SMS", "type": "main", "index": 0 }, { "node": "Send Check-In Email", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Send Check-In SMS": {
+      "main": [[ { "node": "Tag Contact - CheckIn Sent", "type": "main", "index": 0 } ]]
+    }
+  },
+  "active": true,
+  "settings": { "executionOrder": "v1" },
+  "tags": ["build-04", "client-status", "weekly-checkin"]
+}
